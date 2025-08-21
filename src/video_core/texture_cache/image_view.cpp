@@ -100,7 +100,14 @@ ImageView::ImageView(const Vulkan::Instance& instance, const ImageViewInfo& info
     vk::ImageAspectFlags aspect = image.aspect_mask;
     if (image.aspect_mask & vk::ImageAspectFlagBits::eDepth &&
         Vulkan::LiverpoolToVK::IsFormatDepthCompatible(format)) {
-        format = image.info.pixel_format;
+        // Check if this is a depth-stencil format and adjust accordingly
+        if (image.aspect_mask & vk::ImageAspectFlagBits::eStencil) {
+            // For depth-stencil textures, we need to use the original format to preserve stencil
+            format = image.info.pixel_format;
+        } else {
+            // For depth-only textures, we can use the promoted format
+            format = image.info.pixel_format;
+        }
         aspect = vk::ImageAspectFlagBits::eDepth;
     }
     if (image.aspect_mask & vk::ImageAspectFlagBits::eStencil &&

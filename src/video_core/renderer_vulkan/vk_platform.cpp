@@ -26,6 +26,15 @@
 #include <mach-o/dyld.h>
 #endif
 
+// Set MoltenVK configuration environment variables for macOS
+#ifdef __APPLE__
+#include <cstdlib>
+// Enable full image view swizzling to fix depth-stencil format compatibility issues
+static void SetMoltenVKConfig() {
+    setenv("MVK_CONFIG_FULL_IMAGE_VIEW_SWIZZLE", "1", 1);
+}
+#endif
+
 namespace Vulkan {
 
 static const char* const VALIDATION_LAYER_NAME = "VK_LAYER_KHRONOS_validation";
@@ -227,6 +236,9 @@ vk::UniqueInstance CreateInstance(Frontend::WindowSystemType window_type, bool e
     LOG_INFO(Render_Vulkan, "Creating vulkan instance");
 
 #ifdef __APPLE__
+    // Set MoltenVK configuration environment variables
+    SetMoltenVKConfig();
+    
 #ifndef ENABLE_QT_GUI
     // Initialize the environment with the path to the MoltenVK ICD, so that the loader will
     // find it.
@@ -368,6 +380,14 @@ vk::UniqueInstance CreateInstance(Frontend::WindowSystemType window_type, bool e
             .type = vk::LayerSettingTypeEXT::eBool32,
             .valueCount = 1,
             .pValues = &mvk_debug_mode,
+        },
+        // Enable full image view swizzling to fix depth-stencil format compatibility issues
+        vk::LayerSettingEXT{
+            .pLayerName = "MoltenVK",
+            .pSettingName = "MVK_CONFIG_FULL_IMAGE_VIEW_SWIZZLE",
+            .type = vk::LayerSettingTypeEXT::eBool32,
+            .valueCount = 1,
+            .pValues = &mvk_debug_mode, // Use the same value as debug mode
         },
 #endif
     };

@@ -86,6 +86,8 @@ static inline bool IsFormatDepthCompatible(vk::Format fmt) {
     // 16-bit unorm compatible
     case vk::Format::eD16Unorm:
     case vk::Format::eR16Unorm:
+    // RGBA formats that can be promoted to depth
+    case vk::Format::eR8G8B8A8Unorm:
         return true;
     default:
         return false;
@@ -109,6 +111,9 @@ static inline vk::Format PromoteFormatToDepth(vk::Format fmt) {
         return vk::Format::eD32Sfloat;
     } else if (fmt == vk::Format::eR16Unorm) {
         return vk::Format::eD16Unorm;
+    } else if (fmt == vk::Format::eR8G8B8A8Unorm) {
+        // RGBA8Unorm used for depth textures should be promoted to a compatible depth format
+        return vk::Format::eD32Sfloat;
     }
     UNREACHABLE_MSG("Unexpected depth format {}", vk::to_string(fmt));
 }
