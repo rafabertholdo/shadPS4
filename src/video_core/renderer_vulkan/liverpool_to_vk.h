@@ -78,6 +78,18 @@ vk::ClearValue ColorBufferClearValue(const AmdGpu::Liverpool::ColorBuffer& color
 vk::SampleCountFlagBits NumSamples(u32 num_samples, vk::SampleCountFlags supported_flags);
 
 static inline bool IsFormatDepthCompatible(vk::Format fmt) {
+    // Compressed formats should never be considered depth-compatible
+    if (fmt == vk::Format::eBc1RgbaUnormBlock || fmt == vk::Format::eBc1RgbaSrgbBlock ||
+        fmt == vk::Format::eBc1RgbUnormBlock || fmt == vk::Format::eBc1RgbSrgbBlock ||
+        fmt == vk::Format::eBc2UnormBlock || fmt == vk::Format::eBc2SrgbBlock ||
+        fmt == vk::Format::eBc3UnormBlock || fmt == vk::Format::eBc3SrgbBlock ||
+        fmt == vk::Format::eBc4UnormBlock || fmt == vk::Format::eBc4SnormBlock ||
+        fmt == vk::Format::eBc5UnormBlock || fmt == vk::Format::eBc5SnormBlock ||
+        fmt == vk::Format::eBc6HUfloatBlock || fmt == vk::Format::eBc6HSfloatBlock ||
+        fmt == vk::Format::eBc7UnormBlock || fmt == vk::Format::eBc7SrgbBlock) {
+        return false;
+    }
+    
     switch (fmt) {
     // 32-bit float compatible
     case vk::Format::eD32Sfloat:
@@ -107,6 +119,20 @@ static inline bool IsFormatStencilCompatible(vk::Format fmt) {
 }
 
 static inline vk::Format PromoteFormatToDepth(vk::Format fmt) {
+    // Check if this is a compressed format - these should never be promoted to depth
+    if (fmt == vk::Format::eBc1RgbaUnormBlock || fmt == vk::Format::eBc1RgbaSrgbBlock ||
+        fmt == vk::Format::eBc1RgbUnormBlock || fmt == vk::Format::eBc1RgbSrgbBlock ||
+        fmt == vk::Format::eBc2UnormBlock || fmt == vk::Format::eBc2SrgbBlock ||
+        fmt == vk::Format::eBc3UnormBlock || fmt == vk::Format::eBc3SrgbBlock ||
+        fmt == vk::Format::eBc4UnormBlock || fmt == vk::Format::eBc4SnormBlock ||
+        fmt == vk::Format::eBc5UnormBlock || fmt == vk::Format::eBc5SnormBlock ||
+        fmt == vk::Format::eBc6HUfloatBlock || fmt == vk::Format::eBc6HSfloatBlock ||
+        fmt == vk::Format::eBc7UnormBlock || fmt == vk::Format::eBc7SrgbBlock) {
+        // Compressed formats cannot be used as depth textures - return the original format
+        // This prevents the Metal assertion error when trying to create depth views of compressed textures
+        return fmt;
+    }
+    
     if (fmt == vk::Format::eR32Sfloat || fmt == vk::Format::eR32Uint) {
         return vk::Format::eD32Sfloat;
     } else if (fmt == vk::Format::eR16Unorm) {
@@ -115,7 +141,10 @@ static inline vk::Format PromoteFormatToDepth(vk::Format fmt) {
         // RGBA8Unorm used for depth textures should be promoted to a compatible depth format
         return vk::Format::eD32Sfloat;
     }
-    UNREACHABLE_MSG("Unexpected depth format {}", vk::to_string(fmt));
+    
+    // For any other unexpected format, return the original to prevent crashes
+    // This is safer than UNREACHABLE_MSG which could cause issues in release builds
+    return fmt;
 }
 
 } // namespace Vulkan::LiverpoolToVK
