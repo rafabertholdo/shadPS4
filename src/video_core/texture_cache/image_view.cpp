@@ -30,10 +30,18 @@ vk::ImageViewType ConvertImageViewType(AmdGpu::ImageType type) {
 }
 
 bool IsViewTypeCompatible(AmdGpu::ImageType view_type, AmdGpu::ImageType image_type) {
+    // Handle the case where view_type is 1D but image_type is 2D
+    // This can happen when PS4 GPU registers specify 1D but the actual image is 2D
+    if (view_type == AmdGpu::ImageType::Color1D && 
+        (image_type == AmdGpu::ImageType::Color2D || image_type == AmdGpu::ImageType::Color2DArray)) {
+        return false; // Explicitly mark as incompatible so we can fix it
+    }
+    
     switch (view_type) {
     case AmdGpu::ImageType::Color1D:
-    case AmdGpu::ImageType::Color1DArray:
         return image_type == AmdGpu::ImageType::Color1D;
+    case AmdGpu::ImageType::Color1DArray:
+        return image_type == AmdGpu::ImageType::Color1D || image_type == AmdGpu::ImageType::Color1DArray;
     case AmdGpu::ImageType::Color2D:
     case AmdGpu::ImageType::Color2DArray:
     case AmdGpu::ImageType::Color2DMsaa:
@@ -91,6 +99,12 @@ ImageViewInfo::ImageViewInfo(const AmdGpu::Liverpool::DepthBuffer& depth_buffer,
 ImageView::ImageView(const Vulkan::Instance& instance, const ImageViewInfo& info_, Image& image,
                      ImageId image_id_)
     : image_id{image_id_}, info{info_} {
+    // Add safety checks to prevent crashes
+    if (static_cast<vk::Image>(image.image) == VK_NULL_HANDLE) {
+        LOG_ERROR(Render_Vulkan, "Attempting to create image view with null image");
+        return;
+    }
+    
     vk::ImageViewUsageCreateInfo usage_ci{.usage = image.usage_flags};
     if (!info.is_storage) {
         usage_ci.usage &= ~vk::ImageUsageFlagBits::eStorage;
@@ -131,24 +145,43 @@ ImageView::ImageView(const Vulkan::Instance& instance, const ImageViewInfo& info
         },
     };
     if (!IsViewTypeCompatible(info.type, image.info.type)) {
-        LOG_ERROR(Render_Vulkan, "image view type {} is incompatible with image type {}",
-                  vk::to_string(image_view_ci.viewType), vk::to_string(image_view_ci.viewType));
+        LOG_ERROR(Render_Vulkan, "image view type {} is incompatible with image type {}, attempting to fix",
+                  vk::to_string(image_view_ci.viewType), vk::to_string(ConvertImageViewType(image.info.type)));
+        
+        // Try to fix the view type to be compatible with the image type
+        vk::ImageViewType corrected_view_type = ConvertImageViewType(image.info.type);
+        if (corrected_view_type != image_view_ci.viewType) {
+            LOG_WARNING(Render_Vulkan, "Correcting view type from {} to {}",
+                       vk::to_string(image_view_ci.viewType), vk::to_string(corrected_view_type));
+            // Update the view type to match the image type
+            const_cast<vk::ImageViewCreateInfo&>(image_view_ci).viewType = corrected_view_type;
+        }
+    }
+
+    // Don't proceed with image view creation if image is null
+    if (static_cast<vk::Image>(image.image) == VK_NULL_HANDLE) {
+        return;
     }
 
     auto [view_result, view] = instance.GetDevice().createImageViewUnique(image_view_ci);
-    ASSERT_MSG(view_result == vk::Result::eSuccess, "Failed to create image view: {}",
-               vk::to_string(view_result));
+    if (view_result != vk::Result::eSuccess) {
+        LOG_ERROR(Render_Vulkan, "Failed to create image view: {}", vk::to_string(view_result));
+        return;
+    }
     image_view = std::move(view);
 
-    const auto view_aspect = aspect & vk::ImageAspectFlagBits::eDepth     ? "Depth"
-                             : aspect & vk::ImageAspectFlagBits::eStencil ? "Stencil"
-                                                                          : "Color";
-    Vulkan::SetObjectName(
-        instance.GetDevice(), *image_view, "ImageView {}x{}x{} {:#x}:{:#x} {}:{} {}:{} ({})",
-        image.info.size.width, image.info.size.height, image.info.size.depth,
-        image.info.guest_address, image.info.guest_size, info.range.base.level,
-        info.range.base.level + info.range.extent.levels - 1, info.range.base.layer,
-        info.range.base.layer + info.range.extent.layers - 1, view_aspect);
+    // Only set object name if image view was successfully created
+    if (image_view) {
+        const auto view_aspect = aspect & vk::ImageAspectFlagBits::eDepth     ? "Depth"
+                                 : aspect & vk::ImageAspectFlagBits::eStencil ? "Stencil"
+                                                                              : "Color";
+        Vulkan::SetObjectName(
+            instance.GetDevice(), *image_view, "ImageView {}x{}x{} {:#x}:{:#x} {}:{} {}:{} ({})",
+            image.info.size.width, image.info.size.height, image.info.size.depth,
+            image.info.guest_address, image.info.guest_size, info.range.base.level,
+            info.range.base.level + info.range.extent.levels - 1, info.range.base.layer,
+            info.range.base.layer + info.range.extent.layers - 1, view_aspect);
+    }
 }
 
 ImageView::~ImageView() = default;
