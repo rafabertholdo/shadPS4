@@ -142,9 +142,7 @@ static inline vk::Format PromoteFormatToDepth(vk::Format fmt) {
         return vk::Format::eD32Sfloat;
     }
     
-    // For any other unexpected format, return the original to prevent crashes
-    // This is safer than UNREACHABLE_MSG which could cause issues in release builds
-    return fmt;
+    UNREACHABLE_MSG("Unexpected depth format {}", vk::to_string(fmt));
 }
 
 } // namespace Vulkan::LiverpoolToVK
