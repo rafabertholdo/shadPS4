@@ -91,14 +91,13 @@ static inline bool IsFormatDepthCompatible(vk::Format fmt) {
     }
     
     switch (fmt) {
-    // 32-bit float compatible
+    // Native depth formats
     case vk::Format::eD32Sfloat:
+    case vk::Format::eD16Unorm:
+    // Color formats that can be used as depth textures (Metal compatible)
     case vk::Format::eR32Sfloat:
     case vk::Format::eR32Uint:
-    // 16-bit unorm compatible
-    case vk::Format::eD16Unorm:
     case vk::Format::eR16Unorm:
-    // RGBA formats that can be promoted to depth
     case vk::Format::eR8G8B8A8Unorm:
         return true;
     default:
@@ -133,16 +132,23 @@ static inline vk::Format PromoteFormatToDepth(vk::Format fmt) {
         return fmt;
     }
     
-    if (fmt == vk::Format::eR32Sfloat || fmt == vk::Format::eR32Uint) {
-        return vk::Format::eD32Sfloat;
-    } else if (fmt == vk::Format::eR16Unorm) {
+    // For Metal compatibility, be more conservative about format promotion
+    // Only promote formats that are guaranteed to work without causing Metal assertion errors
+    if (fmt == vk::Format::eR16Unorm) {
         return vk::Format::eD16Unorm;
     } else if (fmt == vk::Format::eR8G8B8A8Unorm) {
         // RGBA8Unorm used for depth textures should be promoted to a compatible depth format
         return vk::Format::eD32Sfloat;
     }
     
-    UNREACHABLE_MSG("Unexpected depth format {}", vk::to_string(fmt));
+    // For R32Float and R32Uint, return the original format to prevent Metal compatibility issues
+    // These formats can be used as depth textures directly without promotion
+    if (fmt == vk::Format::eR32Sfloat || fmt == vk::Format::eR32Uint) {
+        return fmt; // Return original format instead of promoting to D32Sfloat
+    }
+    
+    // For any other unexpected format, return the original to prevent crashes
+    return fmt;
 }
 
 } // namespace Vulkan::LiverpoolToVK

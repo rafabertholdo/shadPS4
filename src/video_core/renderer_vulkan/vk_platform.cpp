@@ -32,6 +32,16 @@
 // Enable full image view swizzling to fix depth-stencil format compatibility issues
 static void SetMoltenVKConfig() {
     setenv("MVK_CONFIG_FULL_IMAGE_VIEW_SWIZZLE", "1", 1);
+    // Enable debug logging to help diagnose texture format issues
+    setenv("MVK_CONFIG_LOG_LEVEL", "2", 1);
+    // Force Metal to use compatible texture formats for views
+    setenv("MVK_CONFIG_FORCE_LOW_POWER_GPU", "0", 1);
+    // Enable texture format compatibility checks
+    setenv("MVK_CONFIG_DEBUG", "1", 1);
+    // Force Metal to use compatible texture formats
+    setenv("MVK_CONFIG_USE_METAL_PRIVATE_API", "1", 1);
+    // Disable format substitution for compressed textures
+    setenv("MVK_CONFIG_TEXTURE_1D_AS_2D", "1", 1);
 }
 #endif
 

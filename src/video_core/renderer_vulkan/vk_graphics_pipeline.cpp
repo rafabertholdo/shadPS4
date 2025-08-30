@@ -248,7 +248,18 @@ GraphicsPipeline::GraphicsPipeline(
     for (s32 i = 0; i < key.num_color_attachments; ++i) {
         const auto& col_buf = key.color_buffers[i];
         const auto format = LiverpoolToVK::SurfaceFormat(col_buf.data_format, col_buf.num_format);
-        const auto color_format =
+        
+        // Check if this is a compressed format to prevent format substitution
+        bool is_compressed = (format == vk::Format::eBc1RgbaUnormBlock || format == vk::Format::eBc1RgbaSrgbBlock ||
+                             format == vk::Format::eBc1RgbUnormBlock || format == vk::Format::eBc1RgbSrgbBlock ||
+                             format == vk::Format::eBc2UnormBlock || format == vk::Format::eBc2SrgbBlock ||
+                             format == vk::Format::eBc3UnormBlock || format == vk::Format::eBc3SrgbBlock ||
+                             format == vk::Format::eBc4UnormBlock || format == vk::Format::eBc4SnormBlock ||
+                             format == vk::Format::eBc5UnormBlock || format == vk::Format::eBc5SnormBlock ||
+                             format == vk::Format::eBc6HUfloatBlock || format == vk::Format::eBc6HSfloatBlock ||
+                             format == vk::Format::eBc7UnormBlock || format == vk::Format::eBc7SrgbBlock);
+        
+        const auto color_format = is_compressed ? format : 
             instance.GetSupportedFormat(format, vk::FormatFeatureFlagBits2::eColorAttachment);
         if (!instance.IsFormatSupported(color_format,
                                         vk::FormatFeatureFlagBits2::eColorAttachment)) {

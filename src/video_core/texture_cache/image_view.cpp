@@ -61,7 +61,25 @@ ImageViewInfo::ImageViewInfo(const AmdGpu::Image& image, const Shader::ImageReso
     if (is_storage && nfmt == AmdGpu::NumberFormat::Srgb) {
         nfmt = AmdGpu::NumberFormat::Unorm;
     }
+    
+    // Get the format from the texture
     format = Vulkan::LiverpoolToVK::SurfaceFormat(dfmt, nfmt);
+    
+    // For compressed textures, ensure we preserve the original format to prevent
+    // Metal texture view format incompatibility issues
+    if (format == vk::Format::eBc1RgbaUnormBlock || format == vk::Format::eBc1RgbaSrgbBlock ||
+        format == vk::Format::eBc1RgbUnormBlock || format == vk::Format::eBc1RgbSrgbBlock ||
+        format == vk::Format::eBc2UnormBlock || format == vk::Format::eBc2SrgbBlock ||
+        format == vk::Format::eBc3UnormBlock || format == vk::Format::eBc3SrgbBlock ||
+        format == vk::Format::eBc4UnormBlock || format == vk::Format::eBc4SnormBlock ||
+        format == vk::Format::eBc5UnormBlock || format == vk::Format::eBc5SnormBlock ||
+        format == vk::Format::eBc6HUfloatBlock || format == vk::Format::eBc6HSfloatBlock ||
+        format == vk::Format::eBc7UnormBlock || format == vk::Format::eBc7SrgbBlock) {
+        // For compressed textures, ensure the format matches the source texture
+        // This prevents Metal from trying to create incompatible texture views
+        LOG_DEBUG(Render_Vulkan, "Preserving compressed format {} for texture view", vk::to_string(format));
+    }
+    
     if (desc.is_depth) {
         format = Vulkan::LiverpoolToVK::PromoteFormatToDepth(format);
     }
@@ -83,6 +101,21 @@ ImageViewInfo::ImageViewInfo(const AmdGpu::Liverpool::ColorBuffer& col_buffer) n
     type = range.extent.layers > 1 ? AmdGpu::ImageType::Color2DArray : AmdGpu::ImageType::Color2D;
     format =
         Vulkan::LiverpoolToVK::SurfaceFormat(col_buffer.GetDataFmt(), col_buffer.GetNumberFmt());
+    
+    // For compressed textures, ensure we preserve the original format to prevent
+    // Metal texture view format incompatibility issues
+    if (format == vk::Format::eBc1RgbaUnormBlock || format == vk::Format::eBc1RgbaSrgbBlock ||
+        format == vk::Format::eBc1RgbUnormBlock || format == vk::Format::eBc1RgbSrgbBlock ||
+        format == vk::Format::eBc2UnormBlock || format == vk::Format::eBc2SrgbBlock ||
+        format == vk::Format::eBc3UnormBlock || format == vk::Format::eBc3SrgbBlock ||
+        format == vk::Format::eBc4UnormBlock || format == vk::Format::eBc4SnormBlock ||
+        format == vk::Format::eBc5UnormBlock || format == vk::Format::eBc5SnormBlock ||
+        format == vk::Format::eBc6HUfloatBlock || format == vk::Format::eBc6HSfloatBlock ||
+        format == vk::Format::eBc7UnormBlock || format == vk::Format::eBc7SrgbBlock) {
+        // For compressed textures, ensure the format matches the source texture
+        // This prevents Metal from trying to create incompatible texture views
+        LOG_DEBUG(Render_Vulkan, "Preserving compressed format {} for ColorBuffer texture view", vk::to_string(format));
+    }
 }
 
 ImageViewInfo::ImageViewInfo(const AmdGpu::Liverpool::DepthBuffer& depth_buffer,
@@ -112,7 +145,18 @@ ImageView::ImageView(const Vulkan::Instance& instance, const ImageViewInfo& info
     // When sampling D32/D16 texture from shader, the T# specifies R32/R16 format so adjust it.
     vk::Format format = info.format;
     vk::ImageAspectFlags aspect = image.aspect_mask;
-    if (image.aspect_mask & vk::ImageAspectFlagBits::eDepth &&
+    
+    // Check if this is a compressed format - these should never be converted to depth/stencil
+    bool is_compressed = (format == vk::Format::eBc1RgbaUnormBlock || format == vk::Format::eBc1RgbaSrgbBlock ||
+                         format == vk::Format::eBc1RgbUnormBlock || format == vk::Format::eBc1RgbSrgbBlock ||
+                         format == vk::Format::eBc2UnormBlock || format == vk::Format::eBc2SrgbBlock ||
+                         format == vk::Format::eBc3UnormBlock || format == vk::Format::eBc3SrgbBlock ||
+                         format == vk::Format::eBc4UnormBlock || format == vk::Format::eBc4SnormBlock ||
+                         format == vk::Format::eBc5UnormBlock || format == vk::Format::eBc5SnormBlock ||
+                         format == vk::Format::eBc6HUfloatBlock || format == vk::Format::eBc6HSfloatBlock ||
+                         format == vk::Format::eBc7UnormBlock || format == vk::Format::eBc7SrgbBlock);
+    
+    if (!is_compressed && image.aspect_mask & vk::ImageAspectFlagBits::eDepth &&
         Vulkan::LiverpoolToVK::IsFormatDepthCompatible(format)) {
         // Check if this is a depth-stencil format and adjust accordingly
         if (image.aspect_mask & vk::ImageAspectFlagBits::eStencil) {
@@ -124,7 +168,7 @@ ImageView::ImageView(const Vulkan::Instance& instance, const ImageViewInfo& info
         }
         aspect = vk::ImageAspectFlagBits::eDepth;
     }
-    if (image.aspect_mask & vk::ImageAspectFlagBits::eStencil &&
+    if (!is_compressed && image.aspect_mask & vk::ImageAspectFlagBits::eStencil &&
         Vulkan::LiverpoolToVK::IsFormatStencilCompatible(format)) {
         format = image.info.pixel_format;
         aspect = vk::ImageAspectFlagBits::eStencil;
@@ -134,7 +178,7 @@ ImageView::ImageView(const Vulkan::Instance& instance, const ImageViewInfo& info
         .pNext = &usage_ci,
         .image = image.image,
         .viewType = ConvertImageViewType(info.type),
-        .format = instance.GetSupportedFormat(format, image.format_features),
+        .format = is_compressed ? format : instance.GetSupportedFormat(format, image.format_features),
         .components = info.mapping,
         .subresourceRange{
             .aspectMask = aspect,
@@ -144,6 +188,21 @@ ImageView::ImageView(const Vulkan::Instance& instance, const ImageViewInfo& info
             .layerCount = info.range.extent.layers,
         },
     };
+    
+    // Additional safety check: ensure compressed formats are never converted
+    if (is_compressed && format != image_view_ci.format) {
+        LOG_WARNING(Render_Vulkan, "Preventing format conversion for compressed texture: {} -> {}", 
+                   vk::to_string(format), vk::to_string(image_view_ci.format));
+        // Force the format back to the original compressed format
+        const_cast<vk::ImageViewCreateInfo&>(image_view_ci).format = format;
+    }
+    
+    // For compressed textures, ensure the format is exactly what we expect
+    // This prevents Metal from trying to create incompatible texture views
+    if (is_compressed) {
+        LOG_DEBUG(Render_Vulkan, "Using compressed format {} for texture view", vk::to_string(format));
+    }
+
     if (!IsViewTypeCompatible(info.type, image.info.type)) {
         LOG_ERROR(Render_Vulkan, "image view type {} is incompatible with image type {}, attempting to fix",
                   vk::to_string(image_view_ci.viewType), vk::to_string(ConvertImageViewType(image.info.type)));

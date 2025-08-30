@@ -49,6 +49,7 @@ ImageInfo::ImageInfo(const Libraries::VideoOut::BufferAttributeGroup& group,
     pitch = attrib.tiling_mode == TilingMode::Linear ? size.width : (size.width + 127) & (~127);
     num_bits = attrib.pixel_format != VideoOutFormat::A16R16G16B16Float ? 32 : 64;
     ASSERT(num_bits == 32);
+    resources.levels = 1;  // VideoOut buffers have only one mipmap level
 
     guest_address = cpu_address;
     UpdateSize();
@@ -68,6 +69,7 @@ ImageInfo::ImageInfo(const AmdGpu::Liverpool::ColorBuffer& buffer,
     size.depth = 1;
     pitch = buffer.Pitch();
     resources.layers = buffer.NumSlices();
+    resources.levels = 1;  // Color buffers have only one mipmap level
     meta_info.cmask_addr = buffer.info.fast_clear ? buffer.CmaskAddress() : 0;
     meta_info.fmask_addr = buffer.info.compression ? buffer.FmaskAddress() : 0;
 
@@ -96,6 +98,7 @@ ImageInfo::ImageInfo(const AmdGpu::Liverpool::DepthBuffer& buffer, u32 num_slice
     size.depth = 1;
     pitch = buffer.Pitch();
     resources.layers = num_slices;
+    resources.levels = 1;  // Depth buffers have only one mipmap level
     meta_info.htile_addr = buffer.z_info.tile_surface_en ? htile_address : 0;
 
     stencil_addr = write_buffer ? buffer.StencilWriteAddress() : buffer.StencilAddress();
