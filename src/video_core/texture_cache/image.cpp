@@ -145,7 +145,8 @@ Image::Image(const Vulkan::Instance& instance_, Vulkan::Scheduler& scheduler_,
     }
 
     constexpr auto tiling = vk::ImageTiling::eOptimal;
-    const auto supported_format = instance->GetSupportedFormat(info.pixel_format, format_features);
+    // For compressed textures, preserve the original format to prevent Metal validation errors
+    const auto supported_format = info.props.is_block ? info.pixel_format : instance->GetSupportedFormat(info.pixel_format, format_features);
     const vk::PhysicalDeviceImageFormatInfo2 format_info{
         .format = supported_format,
         .type = ConvertImageType(info.type),

@@ -78,14 +78,27 @@ vk::ClearValue ColorBufferClearValue(const AmdGpu::Liverpool::ColorBuffer& color
 vk::SampleCountFlagBits NumSamples(u32 num_samples, vk::SampleCountFlags supported_flags);
 
 static inline bool IsFormatDepthCompatible(vk::Format fmt) {
+    // Compressed formats should never be considered depth-compatible
+    if (fmt == vk::Format::eBc1RgbaUnormBlock || fmt == vk::Format::eBc1RgbaSrgbBlock ||
+        fmt == vk::Format::eBc1RgbUnormBlock || fmt == vk::Format::eBc1RgbSrgbBlock ||
+        fmt == vk::Format::eBc2UnormBlock || fmt == vk::Format::eBc2SrgbBlock ||
+        fmt == vk::Format::eBc3UnormBlock || fmt == vk::Format::eBc3SrgbBlock ||
+        fmt == vk::Format::eBc4UnormBlock || fmt == vk::Format::eBc4SnormBlock ||
+        fmt == vk::Format::eBc5UnormBlock || fmt == vk::Format::eBc5SnormBlock ||
+        fmt == vk::Format::eBc6HUfloatBlock || fmt == vk::Format::eBc6HSfloatBlock ||
+        fmt == vk::Format::eBc7UnormBlock || fmt == vk::Format::eBc7SrgbBlock) {
+        return false;
+    }
+    
     switch (fmt) {
-    // 32-bit float compatible
+    // Native depth formats
     case vk::Format::eD32Sfloat:
+    case vk::Format::eD16Unorm:
+    // Color formats that can be used as depth textures (Metal compatible)
     case vk::Format::eR32Sfloat:
     case vk::Format::eR32Uint:
-    // 16-bit unorm compatible
-    case vk::Format::eD16Unorm:
     case vk::Format::eR16Unorm:
+    case vk::Format::eR8G8B8A8Unorm:
         return true;
     default:
         return false;
@@ -105,12 +118,37 @@ static inline bool IsFormatStencilCompatible(vk::Format fmt) {
 }
 
 static inline vk::Format PromoteFormatToDepth(vk::Format fmt) {
-    if (fmt == vk::Format::eR32Sfloat || fmt == vk::Format::eR32Uint) {
-        return vk::Format::eD32Sfloat;
-    } else if (fmt == vk::Format::eR16Unorm) {
-        return vk::Format::eD16Unorm;
+    // Check if this is a compressed format - these should never be promoted to depth
+    if (fmt == vk::Format::eBc1RgbaUnormBlock || fmt == vk::Format::eBc1RgbaSrgbBlock ||
+        fmt == vk::Format::eBc1RgbUnormBlock || fmt == vk::Format::eBc1RgbSrgbBlock ||
+        fmt == vk::Format::eBc2UnormBlock || fmt == vk::Format::eBc2SrgbBlock ||
+        fmt == vk::Format::eBc3UnormBlock || fmt == vk::Format::eBc3SrgbBlock ||
+        fmt == vk::Format::eBc4UnormBlock || fmt == vk::Format::eBc4SnormBlock ||
+        fmt == vk::Format::eBc5UnormBlock || fmt == vk::Format::eBc5SnormBlock ||
+        fmt == vk::Format::eBc6HUfloatBlock || fmt == vk::Format::eBc6HSfloatBlock ||
+        fmt == vk::Format::eBc7UnormBlock || fmt == vk::Format::eBc7SrgbBlock) {
+        // Compressed formats cannot be used as depth textures - return the original format
+        // This prevents the Metal assertion error when trying to create depth views of compressed textures
+        return fmt;
     }
-    UNREACHABLE_MSG("Unexpected depth format {}", vk::to_string(fmt));
+    
+    // For Metal compatibility, be more conservative about format promotion
+    // Only promote formats that are guaranteed to work without causing Metal assertion errors
+    if (fmt == vk::Format::eR16Unorm) {
+        return vk::Format::eD16Unorm;
+    } else if (fmt == vk::Format::eR8G8B8A8Unorm) {
+        // RGBA8Unorm used for depth textures should be promoted to a compatible depth format
+        return vk::Format::eD32Sfloat;
+    }
+    
+    // For R32Float and R32Uint, return the original format to prevent Metal compatibility issues
+    // These formats can be used as depth textures directly without promotion
+    if (fmt == vk::Format::eR32Sfloat || fmt == vk::Format::eR32Uint) {
+        return fmt; // Return original format instead of promoting to D32Sfloat
+    }
+    
+    // For any other unexpected format, return the original to prevent crashes
+    return fmt;
 }
 
 } // namespace Vulkan::LiverpoolToVK

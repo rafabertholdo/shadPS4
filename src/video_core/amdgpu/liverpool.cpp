@@ -1,8 +1,6 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <boost/preprocessor/stringize.hpp>
-
 #include "common/assert.h"
 #include "common/config.h"
 #include "common/debug.h"
@@ -24,10 +22,16 @@ static const char* ccb_task_name{"CCB_TASK"};
 #define MAX_NAMES 56
 static_assert(Liverpool::NumComputeRings <= MAX_NAMES);
 
-#define NAME_NUM(z, n, name) BOOST_PP_STRINGIZE(name) BOOST_PP_STRINGIZE(n),
-#define NAME_ARRAY(name, num) {BOOST_PP_REPEAT(num, NAME_NUM, name)}
-
-static const char* acb_task_name[] = NAME_ARRAY(ACB_TASK, MAX_NAMES);
+// Simple task name array without boost preprocessor
+static const char* acb_task_name[] = {
+    "ACB_TASK0", "ACB_TASK1", "ACB_TASK2", "ACB_TASK3", "ACB_TASK4", "ACB_TASK5", "ACB_TASK6", "ACB_TASK7",
+    "ACB_TASK8", "ACB_TASK9", "ACB_TASK10", "ACB_TASK11", "ACB_TASK12", "ACB_TASK13", "ACB_TASK14", "ACB_TASK15",
+    "ACB_TASK16", "ACB_TASK17", "ACB_TASK18", "ACB_TASK19", "ACB_TASK20", "ACB_TASK21", "ACB_TASK22", "ACB_TASK23",
+    "ACB_TASK24", "ACB_TASK25", "ACB_TASK26", "ACB_TASK27", "ACB_TASK28", "ACB_TASK29", "ACB_TASK30", "ACB_TASK31",
+    "ACB_TASK32", "ACB_TASK33", "ACB_TASK34", "ACB_TASK35", "ACB_TASK36", "ACB_TASK37", "ACB_TASK38", "ACB_TASK39",
+    "ACB_TASK40", "ACB_TASK41", "ACB_TASK42", "ACB_TASK43", "ACB_TASK44", "ACB_TASK45", "ACB_TASK46", "ACB_TASK47",
+    "ACB_TASK48", "ACB_TASK49", "ACB_TASK50", "ACB_TASK51", "ACB_TASK52", "ACB_TASK53", "ACB_TASK54", "ACB_TASK55"
+};
 
 #define YIELD(name)                                                                                \
     FIBER_EXIT;                                                                                    \
@@ -174,7 +178,13 @@ Liverpool::Task Liverpool::ProcessCeUpdate(std::span<const u32> ccb) {
         }
         case PM4ItOpcode::DumpConstRam: {
             const auto* dump_const = reinterpret_cast<const PM4DumpConstRam*>(header);
-            memcpy(dump_const->Address<void*>(),
+            void* addr = dump_const->Address<void*>();
+            if (addr == nullptr) {
+                LOG_ERROR(Render, "Invalid dump const ram address: null pointer (addr_hi={:#x}, addr_lo={:#x})", 
+                          dump_const->addr_hi, dump_const->addr_lo);
+                break; // Skip this command to prevent crash
+            }
+            memcpy(addr,
                    cblock.constants_heap.data() + dump_const->Offset(), dump_const->Size());
             break;
         }
@@ -191,8 +201,14 @@ Liverpool::Task Liverpool::ProcessCeUpdate(std::span<const u32> ccb) {
         }
         case PM4ItOpcode::IndirectBufferConst: {
             const auto* indirect_buffer = reinterpret_cast<const PM4CmdIndirectBuffer*>(header);
+            const auto* addr = indirect_buffer->Address<const u32>();
+            if (addr == nullptr) {
+                LOG_ERROR(Render, "Invalid indirect buffer address: null pointer (ibase_hi={:#x}, ibase_lo={:#x})", 
+                          indirect_buffer->ibase_hi.Value(), indirect_buffer->ibase_lo);
+                break; // Skip this command to prevent crash
+            }
             auto task =
-                ProcessCeUpdate({indirect_buffer->Address<const u32>(), indirect_buffer->ib_size});
+                ProcessCeUpdate({addr, indirect_buffer->ib_size});
             RESUME_CE(task);
 
             while (!task.handle.done()) {
@@ -301,19 +317,35 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                 regs.SetDefaults();
                 break;
             }
-            case PM4ItOpcode::SetConfigReg: {
-                const auto* set_data = reinterpret_cast<const PM4CmdSetData*>(header);
-                const auto reg_addr = ConfigRegWordOffset + set_data->reg_offset;
-                const auto* payload = reinterpret_cast<const u32*>(header + 2);
-                std::memcpy(&regs.reg_array[reg_addr], payload, (count - 1) * sizeof(u32));
+                    case PM4ItOpcode::SetConfigReg: {
+            const auto* set_data = reinterpret_cast<const PM4CmdSetData*>(header);
+            const auto reg_addr = ConfigRegWordOffset + set_data->reg_offset;
+            
+            // Add bounds checking to prevent access violations
+            if (reg_addr >= NumRegs || reg_addr + (count - 1) >= NumRegs) {
+                LOG_ERROR(Render_Vulkan, "SetConfigReg: Invalid register address 0x{:x} or count {} exceeds bounds", 
+                         reg_addr, count);
                 break;
             }
-            case PM4ItOpcode::SetContextReg: {
-                const auto* set_data = reinterpret_cast<const PM4CmdSetData*>(header);
-                const auto reg_addr = ContextRegWordOffset + set_data->reg_offset;
-                const auto* payload = reinterpret_cast<const u32*>(header + 2);
+            
+            const auto* payload = reinterpret_cast<const u32*>(header + 2);
+            std::memcpy(&regs.reg_array[reg_addr], payload, (count - 1) * sizeof(u32));
+            break;
+        }
+                    case PM4ItOpcode::SetContextReg: {
+            const auto* set_data = reinterpret_cast<const PM4CmdSetData*>(header);
+            const auto reg_addr = ContextRegWordOffset + set_data->reg_offset;
+            
+            // Add bounds checking to prevent access violations
+            if (reg_addr >= NumRegs || reg_addr + (count - 1) >= NumRegs) {
+                LOG_ERROR(Render_Vulkan, "SetContextReg: Invalid register address 0x{:x} or count {} exceeds bounds", 
+                         reg_addr, count);
+                break;
+            }
+            
+            const auto* payload = reinterpret_cast<const u32*>(header + 2);
 
-                std::memcpy(&regs.reg_array[reg_addr], payload, (count - 1) * sizeof(u32));
+            std::memcpy(&regs.reg_array[reg_addr], payload, (count - 1) * sizeof(u32));
 
                 // In the case of HW, render target memory has alignment as color block operates on
                 // tiles. There is no information of actual resource extents stored in CB context
@@ -392,15 +424,31 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                                  (set_data->reg_offset - 0x200);
                     std::memcpy(addr, header + 2, set_size);
                 } else {
-                    std::memcpy(&regs.reg_array[ShRegWordOffset + set_data->reg_offset], header + 2,
-                                set_size);
+                    const auto reg_addr = ShRegWordOffset + set_data->reg_offset;
+                    
+                    // Add bounds checking to prevent access violations
+                    if (reg_addr >= NumRegs || reg_addr + (count - 1) >= NumRegs) {
+                        LOG_ERROR(Render_Vulkan, "SetShReg: Invalid register address 0x{:x} or count {} exceeds bounds", 
+                                 reg_addr, count);
+                        break;
+                    }
+                    
+                    std::memcpy(&regs.reg_array[reg_addr], header + 2, set_size);
                 }
                 break;
             }
             case PM4ItOpcode::SetUconfigReg: {
                 const auto* set_data = reinterpret_cast<const PM4CmdSetData*>(header);
-                std::memcpy(&regs.reg_array[UconfigRegWordOffset + set_data->reg_offset],
-                            header + 2, (count - 1) * sizeof(u32));
+                const auto reg_addr = UconfigRegWordOffset + set_data->reg_offset;
+                
+                // Add bounds checking to prevent access violations
+                if (reg_addr >= NumRegs || reg_addr + (count - 1) >= NumRegs) {
+                    LOG_ERROR(Render_Vulkan, "SetUconfigReg: Invalid register address 0x{:x} or count {} exceeds bounds", 
+                             reg_addr, count);
+                    break;
+                }
+                
+                std::memcpy(&regs.reg_array[reg_addr], header + 2, (count - 1) * sizeof(u32));
                 break;
             }
             case PM4ItOpcode::SetPredication: {
@@ -610,6 +658,12 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
             }
             case PM4ItOpcode::EventWriteEos: {
                 const auto* event_eos = reinterpret_cast<const PM4CmdEventWriteEos*>(header);
+                void* addr = event_eos->Address();
+                if (addr == nullptr) {
+                    LOG_ERROR(Render, "Invalid event write eos address: null pointer (address_hi={:#x}, address_lo={:#x})", 
+                              event_eos->address_hi.Value(), event_eos->address_lo);
+                    break; // Skip this command to prevent crash
+                }
                 event_eos->SignalFence([](void* address, u64 data, u32 num_bytes) {
                     auto* memory = Core::Memory::Instance();
                     if (!memory->TryWriteBacking(address, &data, num_bytes)) {
@@ -621,13 +675,19 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                     if (rasterizer) {
                         rasterizer->Finish();
                         const u32 value = rasterizer->ReadDataFromGds(event_eos->gds_index);
-                        *event_eos->Address() = value;
+                        *static_cast<u32*>(addr) = value;
                     }
                 }
                 break;
             }
             case PM4ItOpcode::EventWriteEop: {
                 const auto* event_eop = reinterpret_cast<const PM4CmdEventWriteEop*>(header);
+                void* addr = event_eop->Address<void*>();
+                if (addr == nullptr) {
+                    LOG_ERROR(Render, "Invalid event write eop address: null pointer (address_hi={:#x}, address_lo={:#x})", 
+                              event_eop->address_hi.Value(), event_eop->address_lo);
+                    break; // Skip this command to prevent crash
+                }
                 event_eop->SignalFence([](void* address, u64 data, u32 num_bytes) {
                     auto* memory = Core::Memory::Instance();
                     if (!memory->TryWriteBacking(address, &data, num_bytes)) {
@@ -676,9 +736,14 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                 const auto* write_data = reinterpret_cast<const PM4CmdWriteData*>(header);
                 ASSERT(write_data->dst_sel.Value() == 2 || write_data->dst_sel.Value() == 5);
                 const u32 data_size = (header->type3.count.Value() - 2) * 4;
-                u64* address = write_data->Address<u64*>();
                 if (!write_data->wr_one_addr.Value()) {
-                    std::memcpy(address, write_data->data, data_size);
+                    void* addr = write_data->Address<void*>();
+                    if (addr == nullptr) {
+                        LOG_ERROR(Render, "Invalid write data address: null pointer (addr64={:#x})", 
+                                  write_data->addr64);
+                        break; // Skip this command to prevent crash
+                    }
+                    std::memcpy(addr, write_data->data, data_size);
                 } else {
                     UNREACHABLE();
                 }
@@ -740,8 +805,14 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
             }
             case PM4ItOpcode::IndirectBuffer: {
                 const auto* indirect_buffer = reinterpret_cast<const PM4CmdIndirectBuffer*>(header);
+                const auto* addr = indirect_buffer->Address<const u32>();
+                if (addr == nullptr) {
+                    LOG_ERROR(Render, "Invalid indirect buffer address: null pointer (ibase_hi={:#x}, ibase_lo={:#x})", 
+                              indirect_buffer->ibase_hi.Value(), indirect_buffer->ibase_lo);
+                    break; // Skip this command to prevent crash
+                }
                 auto task = ProcessGraphics(
-                    {indirect_buffer->Address<const u32>(), indirect_buffer->ib_size}, {});
+                    {addr, indirect_buffer->ib_size}, {});
                 RESUME_GFX(task);
 
                 while (!task.handle.done()) {
@@ -869,8 +940,14 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
         }
         case PM4ItOpcode::IndirectBuffer: {
             const auto* indirect_buffer = reinterpret_cast<const PM4CmdIndirectBuffer*>(header);
+            const auto* addr = indirect_buffer->Address<const u32>();
+            if (addr == nullptr) {
+                LOG_ERROR(Render, "Invalid indirect buffer address: null pointer (ibase_hi={:#x}, ibase_lo={:#x})", 
+                          indirect_buffer->ibase_hi.Value(), indirect_buffer->ibase_lo);
+                break; // Skip this command to prevent crash
+            }
             auto task = ProcessCompute<true>(
-                {indirect_buffer->Address<const u32>(), indirect_buffer->ib_size}, vqid);
+                {addr, indirect_buffer->ib_size}, vqid);
             RESUME_ASC(task, vqid);
 
             while (!task.handle.done()) {
@@ -992,7 +1069,13 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
             ASSERT(write_data->dst_sel.Value() == 2 || write_data->dst_sel.Value() == 5);
             const u32 data_size = (header->type3.count.Value() - 2) * 4;
             if (!write_data->wr_one_addr.Value()) {
-                std::memcpy(write_data->Address<void*>(), write_data->data, data_size);
+                void* addr = write_data->Address<void*>();
+                if (addr == nullptr) {
+                    LOG_ERROR(Render, "Invalid write data address: null pointer (addr64={:#x})", 
+                              write_data->addr64);
+                    break; // Skip this command to prevent crash
+                }
+                std::memcpy(addr, write_data->data, data_size);
             } else {
                 UNREACHABLE();
             }
